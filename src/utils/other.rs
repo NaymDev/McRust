@@ -2,5 +2,6 @@
 pub enum State {
     HANDSHAKE,
     STATUS,
-    LOGIN
+    LOGIN,
+    CONFIGURATION,
 }

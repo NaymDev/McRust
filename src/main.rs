@@ -6,6 +6,8 @@ use tokio::net::TcpListener;
 use tokio::net::tcp::{OwnedWriteHalf, OwnedReadHalf};
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, Mutex};
+use utils::packets::clientbound::ClientboundLoginSuccesPacket;
+use utils::packets::serverbound::{ServerboundHandshakePacket, ServerboundStatusRequestPacket, ServerboundLoginStartPacket, ServerboundLoginAcknowledgedPacket};
 use utils::packets::{serialization, clientbound, Packet};
 use utils::stream_reader;
 
@@ -13,6 +15,7 @@ use utils::stream_reader;
 
 mod utils;
 use crate::utils::other::State;
+use crate::utils::packets::clientbound::ClientboundStatusResponsePacket;
 
 #[derive(Debug)]
 struct Message(Vec<u8>, usize);
@@ -115,16 +118,20 @@ impl Server {
         let pid = serialization::deserialize!(data, index, i32);
         println!("Pid: {}", pid);
         if self.states[id] == State::HANDSHAKE {
-            if pid == 0 {
-                self.states[id] = State::STATUS;
+            match pid {
+                0 => self.handle_handshake_packet(id, ServerboundHandshakePacket::new(data)).await,
+                _ => unimplemented!("Unknown packet!")
             }
         } else if self.states[id] == State::STATUS {
-            if pid == 0 {
-                println!("Send status");
-                let s = fs::read_to_string("status.txt").unwrap();
-                let _ = self.connections[id].write(clientbound::ClientboundStatusResponsePacket{
-                    json_string: s,
-                }.serialize().as_slice()).await;
+            match pid {
+                0 => self.handle_status_request_packet(id, ServerboundStatusRequestPacket::new(data)).await,
+                _ => unimplemented!("Unknown packet!")
+            }
+        } else if self.states[id] == State::LOGIN {
+            match pid {
+                0 => self.handle_start_login_packet(id, ServerboundLoginStartPacket::new(data)).await,
+                3 => self.handle_login_acknowledged_packet(id, ServerboundLoginAcknowledgedPacket::new(data)).await,
+                _ => unimplemented!("Unknown packet!"),
             }
         }
     }
@@ -133,5 +140,34 @@ impl Server {
         self.connections.push(writer);
         self.states.push(State::HANDSHAKE);
         (self.connections.len() as u8)-1
+    }
+
+    async fn handle_handshake_packet(&mut self, id: usize, packet: ServerboundHandshakePacket) {
+        match packet.next_state {
+            1 => self.states[id] = State::STATUS,
+            _ => self.states[id] = State::LOGIN,
+        }
+    }
+
+    //Statuspacket handler
+    async fn handle_status_request_packet(&mut self, id: usize, packet: ServerboundStatusRequestPacket) {
+        println!("Send status");
+        let s = fs::read_to_string("status.txt").unwrap();
+        let _ = self.connections[id].write(ClientboundStatusResponsePacket{
+            json_string: s,
+        }.serialize().as_slice()).await;
+    }
+
+    //Loginpacket handler
+    async fn handle_start_login_packet(&mut self, id: usize, packet: ServerboundLoginStartPacket) {
+        let _ = self.connections[id].write(ClientboundLoginSuccesPacket{
+            uuid: packet.player_uuid,
+            username: packet.name,
+            num_of_props: 0,
+        }.serialize().as_slice()).await;
+    }
+
+    async fn handle_login_acknowledged_packet(&mut self, id: usize, packet: ServerboundLoginAcknowledgedPacket) {
+        self.states[id] = State::CONFIGURATION;
     }
 }
