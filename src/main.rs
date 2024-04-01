@@ -8,9 +8,8 @@ use tokio::net::tcp::{OwnedWriteHalf, OwnedReadHalf};
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, Mutex};
 use utils::packets::clientbound::{ClientboundDisconnectPacket, ClientboundMapChunkBulkPacket};
-use utils::packets::serialization::{Int, Serializeable};
+use utils::packets::serialization::{Int};
 use utils::packets::{serialization, Packet};
-use utils::smpmap::ChunkColumn;
 use utils::stream_reader;
 use uuid::Uuid;
 
@@ -19,6 +18,7 @@ mod utils;
 use crate::utils::other::State;
 use crate::utils::packets::clientbound::{ClientboundLoginSuccesPacket, ClientboundPingResponsePacket, ClientboundJoinGamePacket, ClientboundPluginMessagePacket, ClientboundStatusResponsePacket};
 use crate::utils::packets::serverbound::{ServerboundHandshakePacket, ServerboundStatusRequestPacket, ServerboundLoginStartPacket, ServerboundPingRequestPacket};
+use crate::utils::smpmap::{ChunkBulkArray, ChunkData, ChunkMeta, ChunkSection};
 
 #[derive(Debug)]
 struct Message(Vec<u8>, usize);
@@ -193,13 +193,26 @@ impl Server {
             channel: "MC|Brand".to_owned(),
             data: "rapid".to_owned(),
         }.serialize().as_slice());
+
         let _ = self.connections[id].write(ClientboundMapChunkBulkPacket{
-            sky_light_sent: true,
-            chunk_column_count: 2,
-            chunk_x: Int{value: 0},chunk_x2: Int{value: 1},
-            chunk_y: Int{value: 0},chunk_y2: Int{value: 0},
-            primary_bit_mask: u16::MAX,primary_bit_mask2: u16::MAX,
-            chunk_data: ChunkColumn::default(),chunk_data2: ChunkColumn::default(),
+            sky_light_sent: false,
+            chunk_column_count: 0,
+            chunks: ChunkBulkArray { chunks: Vec::from([
+                ChunkData {
+                    sections: [
+                        ChunkSection {
+                            blocks: [1; 8192],
+                            blocks_light: [2; 2048],
+                            sky_light: [2; 2048],
+                        };16
+                    ],
+                    meta: ChunkMeta {
+                        chunk_x: Default::default(),
+                        chunk_z: Default::default(),
+                        primary_bit_mask: u16::MAX,
+                    },
+                }
+            ]) },
         }.serialize().as_slice()).await;
 
         let file_path = "generated0x38.bin";

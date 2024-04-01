@@ -85,7 +85,7 @@ pub(crate) mod serverbound {
 pub(crate) mod clientbound {
     use uuid::Uuid;
 
-    use crate::utils::smpmap::ChunkColumn;
+    use crate::utils::smpmap::ChunkBulkArray;
 
     use super::serialization::{Serializable, Int};
     use super::serialization::deserialize;
@@ -166,8 +166,7 @@ pub(crate) mod clientbound {
     packet!(0x26, ClientboundMapChunkBulkPacket{
         sky_light_sent: bool,
         chunk_column_count: i32,
-        chunk_meta: ChunkBulk,
-        chunk_data: ChunkColumn,chunk_data2: ChunkColumn
+        chunks: ChunkBulkArray,
     });
 }
 
@@ -252,21 +251,32 @@ pub mod serialization  {
         }
     }
 
-    impl Serializable for ChunkColumn {
+    impl Serializable for ChunkBulkArray {
         fn serialize(&self) -> Vec<u8> {
             let mut data=Vec::new();
-            for _ in 1..16 {
-                for b in self.blocks {
-                    data.push(b<<4|1&15);
-                    data.push(2);
+            for chunk in self.chunks {
+                data.extend(chunk.meta.chunk_x.serialize());
+                data.extend(chunk.meta.chunk_z.serialize());
+                data.extend(chunk.meta.primary_bit_mask.serialize());
+                const SECTION_COUNT: usize = usize::from(u16::count_ones(chunk.meta.primary_bit_mask));
+                //let mut blocks: [u8; 8192*SECTION_COUNT];
+                //let mut blocks_light: [u8; 2048*SECTION_COUNT];
+                //let mut sky_light: [u8; 2048*SECTION_COUNT];
+
+                let mut blocks = Vec::new();
+                let mut blocks_light = Vec::new();
+                let mut sky_light = Vec::new();
+                for (i, section) in chunk.sections.iter().enumerate() {
+                    if chunk.meta.primary_bit_mask & (1 << i) {
+                        blocks.extend(section.blocks);
+                        blocks_light.extend(section.blocks_light);
+                        sky_light.extend(section.sky_light);
+                    }
                 }
-                data.extend((16 as i32).serialize());
-                data.extend((16*16*16*2 as i32).serialize());
-                data.extend([15|15 as u8; 16*16*8]);
-                for i in 1..self.light.data.len() {
-                    data.push(self.light.data[i-1]|self.light.data[i]);
-                }
-                data.extend([1 as u8; 256]);
+                data.extend(blocks);
+                data.extend(blocks_light);
+                data.extend(sky_light);
+                data.extend([0; 256])
             }
             data
         }
@@ -346,13 +356,13 @@ pub mod serialization  {
             $index+=1;
             if $data[$index-1] == 0x01 {true} else {false}
         }};
-        ($data:expr, $index:expr, ChunkColumn) => {{
-            ChunkColumn::default()
+        ($data:expr, $index:expr, ChunkBulkArray) => {{
+            ChunkBulkArray::default()
         }};
     }
 
     pub(crate) use deserialize;
     use uuid::Uuid;
 
-    use crate::utils::smpmap::ChunkColumn;
+    use crate::utils::smpmap::{ChunkBulkArray, ChunkData};
 }

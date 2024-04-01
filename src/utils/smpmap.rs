@@ -1,13 +1,22 @@
+use crate::utils::packets::serialization::Int;
+
 pub struct ChunkMeta {
-    chunk_x: Int,
-    chunk_y: Int,
-    primary_bit_mask: u16
+    pub chunk_x: Int,
+    pub chunk_z: Int,
+    pub primary_bit_mask: u16
 }
 
 pub struct ChunkData {
+    pub sections: [ChunkSection; 16],
+    pub meta: ChunkMeta
+}
+
+pub struct ChunkSection {
+    pub blocks: [u8; 8192],
+    pub blocks_light: [u8; 2048],
+    pub sky_light: [u8; 2048]
 }
 
 pub struct ChunkBulkArray {
-    chunk_meta: Vec<ChunkMeta>,
-    chunks_data: Vec<ChunkData>
+    pub chunks: Vec<ChunkData>
 }
