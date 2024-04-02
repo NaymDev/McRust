@@ -224,4 +224,5 @@ if __name__ == '__main__':
         
         #Unpack the rest of the packet
         world.unpack(f)
+        print(world.columns[(-17, 14)].chunks[0]["block_data"].data)
     print("Got {} columns".format(len(world.columns)))

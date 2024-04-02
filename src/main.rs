@@ -1,5 +1,6 @@
 use std::{fs, env};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -16,7 +17,8 @@ use uuid::Uuid;
 
 mod utils;
 use crate::utils::other::State;
-use crate::utils::packets::clientbound::{ClientboundLoginSuccesPacket, ClientboundPingResponsePacket, ClientboundJoinGamePacket, ClientboundPluginMessagePacket, ClientboundStatusResponsePacket};
+use crate::utils::packets::clientbound::{ClientboundLoginSuccesPacket, ClientboundPingResponsePacket, ClientboundJoinGamePacket, ClientboundPluginMessagePacket, ClientboundStatusResponsePacket, ClientboundKeepAlivePacket};
+use crate::utils::packets::serialization::Serializable;
 use crate::utils::packets::serverbound::{ServerboundHandshakePacket, ServerboundStatusRequestPacket, ServerboundLoginStartPacket, ServerboundPingRequestPacket};
 use crate::utils::smpmap::{ChunkBulkArray, ChunkData, ChunkMeta, ChunkSection};
 
@@ -64,6 +66,30 @@ async fn main() {
         }
     });
 
+    let thread_shared_server = server.clone();
+    tokio::spawn(async move {
+        let interval_seconds = 20; // Adjust interval as needed
+        let mut interval = tokio::time::interval(Duration::from_secs(interval_seconds));
+
+        loop {
+            interval.tick().await;
+
+            // Lock the server to access its connections
+            let mut server = thread_shared_server.lock().await;
+
+            // Iterate over connections
+            for mut conn in &mut server.connections {
+                // Send ping packet
+                conn.write(ClientboundKeepAlivePacket {
+                    id:  1723,
+                }.serialize().as_slice()).await.expect("TODO: panic message");
+            }
+
+            // Allow other tasks to acquire the lock
+            drop(server);
+        }
+    });
+
     loop {
         let (socket, _) = listener.accept().await.unwrap();
 
@@ -80,10 +106,12 @@ async fn handle_connection(mut reader: OwnedReadHalf, channel_sender: Sender<Mes
         
         match stream_reader::read_varint(&mut reader).await {
             Ok(l) => {
+                println!("Length: {:?}", l);
                 let l = l as usize;
                 match reader.read_exact(&mut buffer[0..l]).await {
                     Ok(_) => {
                         let data = &buffer[0..l];
+                        println!("{:?}", data);
                         let _ = channel_sender.send(Message{
                             0: data.to_vec(), 1: id as usize
                         });
@@ -132,18 +160,53 @@ impl Server {
             match pid {
                 0 => self.handle_status_request_packet(id, ServerboundStatusRequestPacket::new(data)).await,
                 1 => self.handle_ping_request_packet(id, ServerboundPingRequestPacket::new(data)).await,
-                _ => unimplemented!("Unknown packet: STATUS:{pid}!")
+                _ => {
+                    let npid = pid;
+                    Server::write_packet_file(pid, data);
+                    println!("Unknown packet: STATUS:{npid}!");
+                },
             }
         } else if self.states[id] == State::LOGIN {
             match pid {
                 0 => self.handle_start_login_packet(id, ServerboundLoginStartPacket::new(data)).await,
-                _ => unimplemented!("Unknown packet: LOGIN:{pid}!"),
+                _ => {
+                    let npid = pid;
+                    Server::write_packet_file(pid, data);
+                    println!("Unknown packet: LOGIN:{npid}!");
+                },
             }
         } else if self.states[id] == State::PLAY {
             match pid {
-                _ => unimplemented!("Unknown packet: CONFIGURATION:{pid}!"),
+                0x00 => {} //Keep Alive response from client
+                0x03 => {} //Flying is onGround packet [Movement packet]
+                _ => {
+                    let npid = pid;
+                    Server::write_packet_file(pid, data);
+                    println!("Unknown packet: PLAY:{npid}!");
+                },
             }
         }
+    }
+
+    fn write_packet_file(pid: i32, data: Vec<u8>) {
+        let vec1 = pid.serialize();
+
+        // Helper function to convert u8 value to hexadecimal string
+        fn u8_to_hex(value: u8) -> String {
+            format!("0x{:02X} ", value)
+        }
+
+        // Write the contents of vec1 as hexadecimal digits to the file
+        for &byte in &vec1 {
+            print!("{}", u8_to_hex(byte));
+        }
+
+        // Write the contents of vec2 as hexadecimal digits to the file
+        for &byte in &data {
+            print!("{}", u8_to_hex(byte));
+        }
+
+        println!("Data written to file successfully.");
     }
 
     fn add_connection_writer(&mut self, writer: OwnedWriteHalf) -> u8 {
@@ -168,75 +231,68 @@ impl Server {
         }.serialize().as_slice()).await;
     }
     async fn handle_ping_request_packet(&mut self, id: usize, packet: ServerboundPingRequestPacket) {
-        let _ = self.connections[id].write(ClientboundPingResponsePacket{
+        let _ = self.connections[id].write(ClientboundPingResponsePacket {
             payload: packet.paylaod,
         }.serialize().as_slice());
     }
 
     //Loginpacket handler
     async fn handle_start_login_packet(&mut self, id: usize, packet: ServerboundLoginStartPacket) {
-        let _ = self.connections[id].write(ClientboundLoginSuccesPacket{
+        let _ = self.connections[id].write(ClientboundLoginSuccesPacket {
             uuid: Server::generate_offline_uuid(&packet.name),
             username: packet.name,
         }.serialize().as_slice()).await;
         self.states[id] = State::PLAY;
-        let _ = self.connections[id].write(ClientboundJoinGamePacket{
-            id: Int{value: id as i32},
-            gamemode: 0,
+        let _ = self.connections[id].write(ClientboundJoinGamePacket {
+            id: Int { value: id as i32 },
+            gamemode: 1,
             dimension: 0,
             difficulty: 0,
             max_players: 255,
             level_type: "default".to_owned(),
             reduced_debug_info: false,
         }.serialize().as_slice()).await;
-        let _ = self.connections[id].write(ClientboundPluginMessagePacket{
+        let _ = self.connections[id].write(ClientboundPluginMessagePacket {
             channel: "MC|Brand".to_owned(),
             data: "rapid".to_owned(),
         }.serialize().as_slice());
 
-        let _ = self.connections[id].write(ClientboundMapChunkBulkPacket{
-            sky_light_sent: false,
-            chunk_column_count: 0,
-            chunks: ChunkBulkArray { chunks: Vec::from([
-                ChunkData {
-                    sections: [
-                        ChunkSection {
-                            blocks: [1; 8192],
-                            blocks_light: [2; 2048],
-                            sky_light: [2; 2048],
-                        };16
-                    ],
-                    meta: ChunkMeta {
-                        chunk_x: Default::default(),
-                        chunk_z: Default::default(),
-                        primary_bit_mask: u16::MAX,
-                    },
-                }
-            ]) },
+
+        let mut array: [u8; 8192] = [0; 8192];
+        array.iter_mut().enumerate().for_each(|(i, x)| *x = if i % 2 == 0 { 2 << 4 } else { 2 >> 4 });
+
+        let _ = self.connections[id].write(ClientboundMapChunkBulkPacket {
+            sky_light_sent: true,
+            chunk_column_count: 1,
+            chunks: ChunkBulkArray {
+                chunks: Vec::from([
+                    ChunkData {
+                        sections: [
+                            ChunkSection {
+                                blocks: array,
+                                blocks_light: [2; 2048],
+                                sky_light: [2; 2048],
+                            }; 16
+                        ],
+                        meta: ChunkMeta {
+                            chunk_x: Int { value: 0 },
+                            chunk_z: Int { value: 0 },
+                            primary_bit_mask: u16::MAX,
+                        },
+                    }
+                ])
+            },
         }.serialize().as_slice()).await;
 
         let file_path = "generated0x38.bin";
         // Attempt to create or open the file
-    let mut file = match File::create(file_path).await {
-        Ok(file) => file,
-        Err(err) => {
-            eprintln!("Error creating file: {}", err);
-            return;
-        }
-    };
-
-    // Write the u8 slice to the file
-    match file.write_all(ClientboundMapChunkBulkPacket{
-        sky_light_sent: true,
-        chunk_column_count: 2,
-        chunk_x: Int{value: 0},chunk_x2: Int{value: 1},
-        chunk_y: Int{value: 0},chunk_y2: Int{value: 0},
-        primary_bit_mask: u16::MAX,primary_bit_mask2: u16::MAX,
-        chunk_data: ChunkColumn::default(),chunk_data2: ChunkColumn::default(),
-    }.serialize().as_slice()).await {
-        Ok(_) => println!("Data written to {}", file_path),
-        Err(err) => eprintln!("Error writing to file: {}", err),
-    }
+        let mut file = match File::create(file_path).await {
+            Ok(file) => file,
+            Err(err) => {
+                eprintln!("Error creating file: {}", err);
+                return;
+            }
+        };
     }
 
     //Other

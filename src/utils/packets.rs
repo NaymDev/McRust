@@ -254,11 +254,11 @@ pub mod serialization  {
     impl Serializable for ChunkBulkArray {
         fn serialize(&self) -> Vec<u8> {
             let mut data=Vec::new();
-            for chunk in self.chunks {
+            for chunk in &self.chunks {
                 data.extend(chunk.meta.chunk_x.serialize());
                 data.extend(chunk.meta.chunk_z.serialize());
                 data.extend(chunk.meta.primary_bit_mask.serialize());
-                const SECTION_COUNT: usize = usize::from(u16::count_ones(chunk.meta.primary_bit_mask));
+                //const SECTION_COUNT: usize = usize::from(u16::count_ones(chunk.meta.primary_bit_mask));
                 //let mut blocks: [u8; 8192*SECTION_COUNT];
                 //let mut blocks_light: [u8; 2048*SECTION_COUNT];
                 //let mut sky_light: [u8; 2048*SECTION_COUNT];
@@ -267,7 +267,7 @@ pub mod serialization  {
                 let mut blocks_light = Vec::new();
                 let mut sky_light = Vec::new();
                 for (i, section) in chunk.sections.iter().enumerate() {
-                    if chunk.meta.primary_bit_mask & (1 << i) {
+                    if chunk.meta.primary_bit_mask & (1 << i) != 0  {
                         blocks.extend(section.blocks);
                         blocks_light.extend(section.blocks_light);
                         sky_light.extend(section.sky_light);
@@ -276,7 +276,7 @@ pub mod serialization  {
                 data.extend(blocks);
                 data.extend(blocks_light);
                 data.extend(sky_light);
-                data.extend([0; 256])
+                data.extend([0; 256]);
             }
             data
         }

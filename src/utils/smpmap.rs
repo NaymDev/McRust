@@ -11,12 +11,14 @@ pub struct ChunkData {
     pub meta: ChunkMeta
 }
 
+#[derive(Copy, Clone)]
 pub struct ChunkSection {
     pub blocks: [u8; 8192],
     pub blocks_light: [u8; 2048],
     pub sky_light: [u8; 2048]
 }
 
+#[derive(Default)]
 pub struct ChunkBulkArray {
     pub chunks: Vec<ChunkData>
 }
