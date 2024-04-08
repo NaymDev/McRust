@@ -17,10 +17,10 @@ use uuid::Uuid;
 
 mod utils;
 use crate::utils::other::State;
-use crate::utils::packets::clientbound::{ClientboundLoginSuccesPacket, ClientboundPingResponsePacket, ClientboundJoinGamePacket, ClientboundPluginMessagePacket, ClientboundStatusResponsePacket, ClientboundKeepAlivePacket};
+use crate::utils::packets::clientbound::{ClientboundLoginSuccesPacket, ClientboundPingResponsePacket, ClientboundJoinGamePacket, ClientboundPluginMessagePacket, ClientboundStatusResponsePacket, ClientboundKeepAlivePacket, ClientboundSpawnEnityPacket, ClientboundSpawnPositionPacket};
 use crate::utils::packets::serialization::Serializable;
 use crate::utils::packets::serverbound::{ServerboundHandshakePacket, ServerboundStatusRequestPacket, ServerboundLoginStartPacket, ServerboundPingRequestPacket};
-use crate::utils::smpmap::{ChunkBulkArray, ChunkData, ChunkMeta, ChunkSection};
+use crate::utils::smpmap::{ChunkBulkArray, ChunkData, ChunkMeta, ChunkSection, Position};
 
 #[derive(Debug)]
 struct Message(Vec<u8>, usize);
@@ -34,7 +34,7 @@ impl Clone for Message {
 async fn main() {
     //DEBUG
     let _ = env::set_current_dir("D:/OpenMcRust/runtime");
-    //env::set_var("RUST_BACKTRACE", "1");
+    env::set_var("RUST_BACKTRACE", "1");
 
 
     let server = Arc::new(Mutex::new(Server::new()));
@@ -283,6 +283,35 @@ impl Server {
                 ])
             },
         }.serialize().as_slice()).await;
+        let _ = self.connections[id].write(ClientboundSpawnEnityPacket{
+            entity_id: 42,
+            tipe: 25,
+            x: Int{value: 8},
+            y: Int{value: 60},
+            z: Int{value: 8},
+            pitch: 0,
+            yaw: 0,
+            head_yam: 0,
+            velocity_x: 0,
+            velocity_y: 0,
+            velocity_z: 0,
+            metadata: 127,
+        }.serialize().as_slice()).await;
+
+        Server::write_packet_file(0x0F, ClientboundSpawnEnityPacket{
+            entity_id: 2,
+            tipe: 8,
+            x: Int{value: 5},
+            y: Int{value: 260},
+            z: Int{value: 5},
+            pitch: 0,
+            yaw: 0,
+            head_yam: 0,
+            velocity_x: 0,
+            velocity_y: 0,
+            velocity_z: 0,
+            metadata: 127,
+        }.serialize());
 
         let file_path = "generated0x38.bin";
         // Attempt to create or open the file

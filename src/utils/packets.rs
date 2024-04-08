@@ -85,7 +85,7 @@ pub(crate) mod serverbound {
 pub(crate) mod clientbound {
     use uuid::Uuid;
 
-    use crate::utils::smpmap::ChunkBulkArray;
+    use crate::utils::smpmap::{ChunkBulkArray, Position};
 
     use super::serialization::{Serializable, Int};
     use super::serialization::deserialize;
@@ -168,6 +168,23 @@ pub(crate) mod clientbound {
         chunk_column_count: i32,
         chunks: ChunkBulkArray,
     });
+    packet!(0x0F, ClientboundSpawnEnityPacket{
+        entity_id: i32,
+        tipe: u8,
+        x: Int,
+        y: Int,
+        z: Int,
+        pitch: u8,
+        yaw: u8,
+        head_yam: u8,
+        velocity_x: i16,
+        velocity_y: i16,
+        velocity_z: i16,
+        metadata: u8,
+    });
+    packet!(0x05, ClientboundSpawnPositionPacket{
+       location: Position,
+    });
 }
 
 pub mod serialization  {
@@ -177,7 +194,7 @@ pub mod serialization  {
     }
     impl Serializable for Int {
         fn serialize(&self) -> Vec<u8> {
-            self.value.to_le_bytes().to_vec()
+            self.value.to_be_bytes().to_vec()
         }
     }
 
@@ -185,7 +202,8 @@ pub mod serialization  {
     pub trait Serializable {
         fn serialize(&self) -> Vec<u8>;
     }
-    
+
+    //VarInt
     impl Serializable for i32 {
         fn serialize(&self) -> Vec<u8> {
             const SEGMENT_BITS: i32 = 0x7F;
@@ -207,7 +225,44 @@ pub mod serialization  {
             }
         }
     }
-    
+
+    //Double
+    impl Serializable for f64 {
+        fn serialize(&self) -> Vec<u8> {
+            // Convert the f64 into bytes
+            let bytes: [u8; 8] = self.to_ne_bytes();
+            // Convert bytes into a Vec<u8>
+            bytes.to_vec()
+        }
+    }
+
+    //Short
+    impl Serializable for i16 {
+        fn serialize(&self) -> Vec<u8> {
+            let mut result = vec![];
+            result.extend(&self.to_be_bytes());
+            result
+        }
+    }
+
+    impl Serializable for Position {
+        fn serialize(&self) -> Vec<u8> {
+            let mut result = Vec::new();
+
+            // Serialize x as a 26-bit integer
+            result.push(((self.x >> 18) & 0xFF) as u8);
+            result.push(((self.x >> 10) & 0xFF) as u8);
+            result.push(((self.x >> 2) & 0xFF) as u8);
+            result.push(((self.x << 6) as u8 & 0xC0u8 | (self.z >> 20) as u8 & 0x3F));
+            result.push(((self.z >> 12) & 0xFF) as u8);
+            result.push(((self.z >> 4) & 0xFF) as u8);
+            result.push(((self.z << 4) as u8 & 0xF0u8 | ((self.y >> 8) & 0x0F) as u8));
+            result.push((self.y & 0xFF) as u8);
+
+            result
+        }
+    }
+
     impl Serializable for String {
         fn serialize(&self) -> Vec<u8> {
             let mut data = (self.chars().count() as i32).serialize();
@@ -325,9 +380,21 @@ pub mod serialization  {
             u16::from_le_bytes([$data[$index-1],
                                 $data[$index-2]])
         }};
+        ($data:expr, $index:expr, i16) => {{
+            $index+=2;
+            i16::from_le_bytes([$data[$index-1],
+                                $data[$index-2]])
+        }};
         ($data:expr, $index:expr, i64) => {{
             $index+=8;
             i64::from_le_bytes([$data[$index-1],$data[$index-2],
+                                $data[$index-3],$data[$index-4],
+                                $data[$index-5],$data[$index-6],
+                                $data[$index-7],$data[$index-8],])
+        }};
+        ($data:expr, $index:expr, f64) => {{
+            $index+=8;
+            f64::from_le_bytes([$data[$index-1],$data[$index-2],
                                 $data[$index-3],$data[$index-4],
                                 $data[$index-5],$data[$index-6],
                                 $data[$index-7],$data[$index-8],])
@@ -359,10 +426,17 @@ pub mod serialization  {
         ($data:expr, $index:expr, ChunkBulkArray) => {{
             ChunkBulkArray::default()
         }};
+        ($data:expr, $index:expr, Position) => {{
+            Position{
+                x: 0,
+                y: 0,
+                z: 0,
+            }
+        }};
     }
 
     pub(crate) use deserialize;
     use uuid::Uuid;
 
-    use crate::utils::smpmap::{ChunkBulkArray, ChunkData};
+    use crate::utils::smpmap::{ChunkBulkArray, ChunkData, Position};
 }

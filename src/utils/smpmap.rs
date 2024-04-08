@@ -22,3 +22,10 @@ pub struct ChunkSection {
 pub struct ChunkBulkArray {
     pub chunks: Vec<ChunkData>
 }
+
+#[derive(Default)]
+pub struct Position {
+    pub(crate) x: i32,
+    pub(crate) z: i32,
+    pub(crate) y: i16,
+}
