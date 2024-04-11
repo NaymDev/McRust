@@ -287,10 +287,10 @@ impl Server {
             level_type: "default".to_owned(),
             reduced_debug_info: false,
         }.serialize().as_slice()).await;
-        /*let _ = self.connections[id].write(ClientboundPluginMessagePacket {
+        let _ = self.connections[id].write(ClientboundPluginMessagePacket {
             channel: "MC|Brand".to_owned(),
             data: "rapid".to_owned(),
-        }.serialize().as_slice());*/
+        }.serialize().as_slice());
 
         let _ = self.connections[id].write(ClientboundPlayerListItem{
             modifier: PlayerItemListModifier{
