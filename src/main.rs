@@ -1,6 +1,7 @@
 use std::{fs, env};
+use std::collections::btree_map::Range;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,10 +18,44 @@ use uuid::Uuid;
 
 mod utils;
 use crate::utils::other::State;
-use crate::utils::packets::clientbound::{ClientboundLoginSuccesPacket, ClientboundPingResponsePacket, ClientboundJoinGamePacket, ClientboundPluginMessagePacket, ClientboundStatusResponsePacket, ClientboundKeepAlivePacket, ClientboundSpawnEnityPacket, ClientboundSpawnPositionPacket};
+use crate::utils::packets::clientbound::{ClientboundLoginSuccesPacket, ClientboundPingResponsePacket, ClientboundJoinGamePacket, ClientboundPluginMessagePacket, ClientboundStatusResponsePacket, ClientboundKeepAlivePacket, ClientboundSpawnEnityPacket, ClientboundSpawnPositionPacket, ClientboundSpawnPlayerPacket, ClientboundPlayerListItem};
 use crate::utils::packets::serialization::Serializable;
 use crate::utils::packets::serverbound::{ServerboundHandshakePacket, ServerboundStatusRequestPacket, ServerboundLoginStartPacket, ServerboundPingRequestPacket};
 use crate::utils::smpmap::{ChunkBulkArray, ChunkData, ChunkMeta, ChunkSection, Position};
+use crate::utils::types::{Angle, Player, PlayerItemListModifier, Property};
+
+
+
+
+//TODO remove functions
+fn generate_uuid_v2() -> Uuid {
+    // UUID version 2 has the following structure:
+    // | timestamp (60 bits) | clock sequence (14 bits) | reserved (2 bits) | node (48 bits) |
+
+    // Get current timestamp in 100-nanosecond intervals since the Gregorian epoch
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() / 100;
+
+    // Split the timestamp into 60 bits (masking to keep only 60 bits)
+    let timestamp_bits = timestamp & 0x0fffffffffffffff;
+
+    // Generate a clock sequence (14 bits)
+    let clock_sequence = rand::random::<u16>() & 0x3fff;
+
+    // Generate node identifier (48 bits)
+    // Note: You may need to replace this with an actual MAC address or other unique identifier
+    let node: [u8; 8] = rand::random();
+
+    // Construct UUID version 2
+    let uuid = Uuid::from_fields(
+        timestamp_bits as u32,
+        (timestamp_bits >> 32) as u16,
+        clock_sequence,
+        &node,
+    );
+
+    uuid
+}
+
 
 #[derive(Debug)]
 struct Message(Vec<u8>, usize);
@@ -51,8 +86,8 @@ async fn main() {
         loop {
             match receiver.recv().await {
                 Ok(message) => {
-                    println!("----------------------");
-                    println!("Received: {:?}", message.0);
+                    //println!("----------------------");
+                    //println!("Received: {:?}", message.0);
                     let _ = thread_shared_server.lock().await.handle_raw_packet(message.0, message.1).await;
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
@@ -239,8 +274,8 @@ impl Server {
     //Loginpacket handler
     async fn handle_start_login_packet(&mut self, id: usize, packet: ServerboundLoginStartPacket) {
         let _ = self.connections[id].write(ClientboundLoginSuccesPacket {
-            uuid: Server::generate_offline_uuid(&packet.name),
-            username: packet.name,
+            uuid: Server::generate_offline_uuid(&packet.name).to_string(),
+            username: packet.name.clone(),
         }.serialize().as_slice()).await;
         self.states[id] = State::PLAY;
         let _ = self.connections[id].write(ClientboundJoinGamePacket {
@@ -252,12 +287,70 @@ impl Server {
             level_type: "default".to_owned(),
             reduced_debug_info: false,
         }.serialize().as_slice()).await;
-        let _ = self.connections[id].write(ClientboundPluginMessagePacket {
+        /*let _ = self.connections[id].write(ClientboundPluginMessagePacket {
             channel: "MC|Brand".to_owned(),
             data: "rapid".to_owned(),
+        }.serialize().as_slice());*/
+
+        let _ = self.connections[id].write(ClientboundPlayerListItem{
+            modifier: PlayerItemListModifier{
+                action: 0,
+                players: Vec::from([
+                    Player{
+                        uuid: Server::generate_offline_uuid(&packet.name),
+                        name: "Damian_9".parse().unwrap(),
+                        properties: Vec::from([
+                            /*Property {
+                                name: "textures".to_string(),
+                                value: "ewogICJ0aW1lc3RhbXAiIDogMTcxMjg0MjY5MzgzNSwKICAicHJvZmlsZUlkIiA6ICIyM2QxMjkxNjg0MDM0YzYzYTVkNDFmM2VhYmIxMDdhMCIsCiAgInByb2ZpbGVOYW1lIiA6ICJEYW1pYW5fOSIsCiAgInRleHR1cmVzIiA6IHsKICAgICJTS0lOIiA6IHsKICAgICAgInVybCIgOiAiaHR0cDovL3RleHR1cmVzLm1pbmVjcmFmdC5uZXQvdGV4dHVyZS82NmJjYmJhZDc5NzEwZGI0YjAyYTQzMjcyOTEwYTAyYzRlNjQzNGZmZWJhZTFjZTU4NzUzMmYyYTM4ZTYxZDRiIiwKICAgICAgIm1ldGFkYXRhIiA6IHsKICAgICAgICAibW9kZWwiIDogInNsaW0iCiAgICAgIH0KICAgIH0sCiAgICAiQ0FQRSIgOiB7CiAgICAgICJ1cmwiIDogImh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMjM0MGMwZTAzZGQyNGExMWIxNWE4YjMzYzJhN2U5ZTMyYWJiMjA1MWIyNDgxZDBiYTdkZWZkNjM1Y2E3YTkzMyIKICAgIH0KICB9Cn0=".to_string(),
+                                signature: "tLqHQtfytpXB5tpigiQSvo4hj4uNGtNozEjaxWjRYgAfiOOBG/sQqSjdlWju7aqkuu+6NfOj2bxMkY3hDdLTWIt2hdCajbTapsIQ3fKKtBHalyN57FioXXHrskZWOh6EnHy511XuWgCw21t2qJQRV76htyoVD4B4jP4nkcHVP8rsDO8eCI5CRTWZE9+rPfvhVesQX4mMlh1obQFrAkgXrBdWqEM++KppehrkD3+Cefda0jbLYwhYyOr0XfIT/4oCRr8bN523EFFkTlyCbCdEiUsbENp/D86e8Anv8+47fn6NZW2adATHgNNc+ls73r/jtO/JreOs/zLD3NAU3mHb/rIIXFeTRsusffI2peku2xlBqXuPgw5/Fg0eBwFcDpaG5vsiMSxyUJdSwGs84wyf8T4QtLXHdPPafCsApjH6Yts8aQagxZmvMYsOY8JuEiobVbJQ3Ng5Hl3CFVhfdsLFUCB92cTR7hnwkXZDhhArWCN70Zz7VKHjV3yp4gWyaDmVNkii4z/ez4BmYXbI/QmekCTGXm6dzm+3GzSgqJd+ByAFV9KCiIlGvyfbi+udpRbed7Okz17uofo93KU7KXokjrUgMJsmjt7twdBWXKe7/dB2WeC0x8hTOxMPhUG37aMTy62/3xO+x2WOpJJ/kFMls9+Dis1DSHI7YuJH/pQuYNk=".to_string(),
+                            }*/
+                        ]),
+                        gamemode: 0,
+                        ping: 0,
+                        display_name: "".parse().unwrap()//"{\"text\":\"Damian_9\"}".parse().unwrap(),
+                    }
+                ])
+            },
         }.serialize().as_slice());
+        let _ = self.connections[id].write(ClientboundSpawnPlayerPacket {
+            entity_id: 123,
+            player_uuid: Server::generate_offline_uuid(&packet.name),
+            x: Int{value: 0},
+            y: Int{value: 0},
+            z: Int{value: 0},
+            yaw: Default::default(),
+            pitch: Default::default(),
+            current_item: 0,
+            metadata: 127,
+        }.serialize().as_slice()).await;
+        //self.spawn_npc("NPC".to_string(), Uuid::new_v4()).await;
+        println!("NPC");
+        Self::write_packet_file(0x00, ClientboundPlayerListItem{
+            modifier: PlayerItemListModifier{
+                action: 0,
+                players: Vec::from([
+                    Player{
+                        uuid: Server::generate_offline_uuid(&packet.name),
+                        name: "Damian_9".parse().unwrap(),
+                        properties: Vec::from([
+                            /*Property {
+                                name: "textures".to_string(),
+                                value: "ewogICJ0aW1lc3RhbXAiIDogMTcxMjg0MjY5MzgzNSwKICAicHJvZmlsZUlkIiA6ICIyM2QxMjkxNjg0MDM0YzYzYTVkNDFmM2VhYmIxMDdhMCIsCiAgInByb2ZpbGVOYW1lIiA6ICJEYW1pYW5fOSIsCiAgInRleHR1cmVzIiA6IHsKICAgICJTS0lOIiA6IHsKICAgICAgInVybCIgOiAiaHR0cDovL3RleHR1cmVzLm1pbmVjcmFmdC5uZXQvdGV4dHVyZS82NmJjYmJhZDc5NzEwZGI0YjAyYTQzMjcyOTEwYTAyYzRlNjQzNGZmZWJhZTFjZTU4NzUzMmYyYTM4ZTYxZDRiIiwKICAgICAgIm1ldGFkYXRhIiA6IHsKICAgICAgICAibW9kZWwiIDogInNsaW0iCiAgICAgIH0KICAgIH0sCiAgICAiQ0FQRSIgOiB7CiAgICAgICJ1cmwiIDogImh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvMjM0MGMwZTAzZGQyNGExMWIxNWE4YjMzYzJhN2U5ZTMyYWJiMjA1MWIyNDgxZDBiYTdkZWZkNjM1Y2E3YTkzMyIKICAgIH0KICB9Cn0=".to_string(),
+                                signature: "tLqHQtfytpXB5tpigiQSvo4hj4uNGtNozEjaxWjRYgAfiOOBG/sQqSjdlWju7aqkuu+6NfOj2bxMkY3hDdLTWIt2hdCajbTapsIQ3fKKtBHalyN57FioXXHrskZWOh6EnHy511XuWgCw21t2qJQRV76htyoVD4B4jP4nkcHVP8rsDO8eCI5CRTWZE9+rPfvhVesQX4mMlh1obQFrAkgXrBdWqEM++KppehrkD3+Cefda0jbLYwhYyOr0XfIT/4oCRr8bN523EFFkTlyCbCdEiUsbENp/D86e8Anv8+47fn6NZW2adATHgNNc+ls73r/jtO/JreOs/zLD3NAU3mHb/rIIXFeTRsusffI2peku2xlBqXuPgw5/Fg0eBwFcDpaG5vsiMSxyUJdSwGs84wyf8T4QtLXHdPPafCsApjH6Yts8aQagxZmvMYsOY8JuEiobVbJQ3Ng5Hl3CFVhfdsLFUCB92cTR7hnwkXZDhhArWCN70Zz7VKHjV3yp4gWyaDmVNkii4z/ez4BmYXbI/QmekCTGXm6dzm+3GzSgqJd+ByAFV9KCiIlGvyfbi+udpRbed7Okz17uofo93KU7KXokjrUgMJsmjt7twdBWXKe7/dB2WeC0x8hTOxMPhUG37aMTy62/3xO+x2WOpJJ/kFMls9+Dis1DSHI7YuJH/pQuYNk=".to_string(),
+                            }*/
+                        ]),
+                        gamemode: 0,
+                        ping: 0,
+                        display_name: "{\"text\":\"Damian_9\"}".parse().unwrap(),
+                    }
+                ])
+            },
+        }.serialize());
 
 
+
+        //Load world
         let mut array: [u8; 8192] = [0; 8192];
         array.iter_mut().enumerate().for_each(|(i, x)| *x = if i % 2 == 0 { 2 << 4 } else { 2 >> 4 });
 
@@ -283,45 +376,6 @@ impl Server {
                 ])
             },
         }.serialize().as_slice()).await;
-        let _ = self.connections[id].write(ClientboundSpawnEnityPacket{
-            entity_id: 42,
-            tipe: 25,
-            x: Int{value: 8},
-            y: Int{value: 60},
-            z: Int{value: 8},
-            pitch: 0,
-            yaw: 0,
-            head_yam: 0,
-            velocity_x: 0,
-            velocity_y: 0,
-            velocity_z: 0,
-            metadata: 127,
-        }.serialize().as_slice()).await;
-
-        Server::write_packet_file(0x0F, ClientboundSpawnEnityPacket{
-            entity_id: 2,
-            tipe: 8,
-            x: Int{value: 5},
-            y: Int{value: 260},
-            z: Int{value: 5},
-            pitch: 0,
-            yaw: 0,
-            head_yam: 0,
-            velocity_x: 0,
-            velocity_y: 0,
-            velocity_z: 0,
-            metadata: 127,
-        }.serialize());
-
-        let file_path = "generated0x38.bin";
-        // Attempt to create or open the file
-        let mut file = match File::create(file_path).await {
-            Ok(file) => file,
-            Err(err) => {
-                eprintln!("Error creating file: {}", err);
-                return;
-            }
-        };
     }
 
     //Other
@@ -332,12 +386,45 @@ impl Server {
         // Generate the UUID based on the namespace and username
         let offline_uuid = Uuid::new_v3(&namespace, username.as_bytes());
         //println!("{}", offline_uuid.to_string());
-        offline_uuid
+        //offline_uuid
+        Uuid::parse_str("643147bc-1af0-472e-9acb-19aaa150bd96").unwrap()
     }
     async fn disconnect_all(&mut self) {
         for conn in &mut self.connections {
             let _ = conn.write(ClientboundDisconnectPacket{
                 reason: "{\"text\":\"This is a test!\"}".to_owned(),
+            }.serialize().as_slice());
+        }
+    }
+
+    async fn spawn_npc(&mut self, name: String, uuid: Uuid) {
+        for conn in &mut self.connections {
+            println!("NPC");
+            let _ = conn.write(ClientboundPlayerListItem{
+                modifier: PlayerItemListModifier{
+                    action: 0,
+                    players: Vec::from([
+                        Player{
+                            uuid,
+                            name: name.clone(),
+                            properties: Vec::from([]),
+                            gamemode: 0,
+                            ping: 0,
+                            display_name: name.clone(),
+                        }
+                    ])
+                },
+            }.serialize().as_slice());
+            let _ = conn.write(ClientboundSpawnPlayerPacket{
+                entity_id: 2345,
+                player_uuid: uuid,
+                x: Int{value: 8},
+                y: Int{value: 60},
+                z: Int{value: 8},
+                yaw: Default::default(),
+                pitch: Default::default(),
+                current_item: 0,
+                metadata: 127,
             }.serialize().as_slice());
         }
     }

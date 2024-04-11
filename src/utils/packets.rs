@@ -86,6 +86,7 @@ pub(crate) mod clientbound {
     use uuid::Uuid;
 
     use crate::utils::smpmap::{ChunkBulkArray, Position};
+    use crate::utils::types::{Angle, PlayerItemListModifier};
 
     use super::serialization::{Serializable, Int};
     use super::serialization::deserialize;
@@ -139,7 +140,7 @@ pub(crate) mod clientbound {
         reason: String,
     });
     packet!(2, ClientboundLoginSuccesPacket{
-        uuid: Uuid,
+        uuid: String,
         username: String,
     });
 
@@ -184,6 +185,20 @@ pub(crate) mod clientbound {
     });
     packet!(0x05, ClientboundSpawnPositionPacket{
        location: Position,
+    });
+    packet!(0x0C, ClientboundSpawnPlayerPacket{
+        entity_id: i32,
+        player_uuid: Uuid,
+        x: Int,
+        y: Int,
+        z: Int,
+        yaw: Angle,
+        pitch: Angle,
+        current_item: i16,
+        metadata: u8,
+    });
+    packet!(0x38, ClientboundPlayerListItem{
+        modifier: PlayerItemListModifier,
     });
 }
 
@@ -263,6 +278,12 @@ pub mod serialization  {
         }
     }
 
+    impl Serializable for Angle {
+        fn serialize(&self) -> Vec<u8> {
+            self.value.serialize()
+        }
+    }
+
     impl Serializable for String {
         fn serialize(&self) -> Vec<u8> {
             let mut data = (self.chars().count() as i32).serialize();
@@ -285,7 +306,7 @@ pub mod serialization  {
 
     impl Serializable for Uuid {
         fn serialize(&self) -> Vec<u8> {
-            self.to_string().serialize()
+            self.as_u128().to_le_bytes().to_vec()
         }
     }
 
@@ -336,7 +357,56 @@ pub mod serialization  {
             data
         }
     }
-    
+
+    impl Serializable for PlayerItemListModifier {
+        fn serialize(&self) -> Vec<u8> {
+            let mut data = Vec::new();
+            data.extend(self.action.serialize());
+            data.extend((self.players.len() as i32).serialize());
+            match self.action {
+                0 => { //Add player
+                    for player in &self.players {
+                        data.extend(player.serialize());
+                    }
+                }
+                _ => {}
+            }
+            data
+        }
+    }
+
+    impl Serializable for Player {
+        fn serialize(&self) -> Vec<u8> {
+            let mut data = Vec::new();
+            data.extend(self.uuid.serialize());
+            data.extend(self.name.serialize());
+            data.extend((self.properties.len() as i32).serialize());
+            for property in &self.properties {
+                data.extend(property.serialize());
+            }
+            data.extend(self.gamemode.serialize());
+            data.extend(self.ping.serialize());
+            data.extend((self.display_name.len()!=0).serialize());
+            if self.display_name.len() != 0 {
+                data.extend(self.display_name.serialize());
+            }
+            data
+        }
+    }
+
+    impl Serializable for Property {
+        fn serialize(&self) -> Vec<u8> {
+            let mut data = Vec::new();
+            data.extend(self.name.serialize());
+            data.extend(self.value.serialize());
+            data.extend((self.signature.len()!=0).serialize());
+            if self.signature.len() != 0 {
+                data.extend(self.signature.serialize());
+            }
+            data
+        }
+    }
+
     macro_rules! deserialize {
         ($data:expr, $index:expr, i32) => {{
             let mut result = 0;
@@ -426,11 +496,22 @@ pub mod serialization  {
         ($data:expr, $index:expr, ChunkBulkArray) => {{
             ChunkBulkArray::default()
         }};
-        ($data:expr, $index:expr, Position) => {{
+        ($data:expr, $index:expr, Position) => {{ //TODO implement actual serialization
             Position{
                 x: 0,
                 y: 0,
                 z: 0,
+            }
+        }};
+        ($data:expr, $index:expr, Angle) => {{ //TODO implement actual serialization
+            Angle{
+                value: 0
+            }
+        }};
+        ($data:expr, $index:expr, PlayerItemListModifier) => {{ //TODO implement actual serialization | not necsery as the client does not send this to the server
+            PlayerItemListModifier {
+                action: 0,
+                players: Vec::from([])
             }
         }};
     }
@@ -439,4 +520,5 @@ pub mod serialization  {
     use uuid::Uuid;
 
     use crate::utils::smpmap::{ChunkBulkArray, ChunkData, Position};
+    use crate::utils::types::{Angle, Player, PlayerItemListModifier, Property};
 }
